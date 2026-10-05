@@ -12,15 +12,9 @@
 [![Licença](https://img.shields.io/badge/Licen%C3%A7a-MIT-green?style=for-the-badge)](LICENSE)
 [![Privacidade](https://img.shields.io/badge/Privacidade-100%25%20Local%20%26%20Zero%20Telemetria-00b4d8?style=for-the-badge)](https://github.com/WennyLife/CableNet)
 
-<br/>
+**Saiba instantaneamente se o seu Mac está navegando pelo cabo de rede (Ethernet) ou pelo Wi-Fi, com diagnóstico visual de internet e animações fluidas diretamente na barra de menus!**
 
-### 🚀 **Clique abaixo para baixar a versão mais recente:**
-
-[![Download DMG](https://img.shields.io/badge/⬇️_Baixar_Instalador-CableNet_.dmg-2ea44f?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/WennyLife/CableNet/raw/main/release/CableNet-1.0.11.dmg)
-&nbsp;
-[![Download ZIP](https://img.shields.io/badge/📦_Baixar_Pacote-CableNet_.zip-0366d6?style=for-the-badge)](https://github.com/WennyLife/CableNet/raw/main/release/CableNet-1.0.11.zip)
-
-<br/>
+[Download macOS (.dmg)](https://github.com/WennyLife/CableNet/raw/main/release/CableNet-1.0.11.dmg) • [Download (.zip)](https://github.com/WennyLife/CableNet/raw/main/release/CableNet-1.0.11.zip)
 
 </div>
 

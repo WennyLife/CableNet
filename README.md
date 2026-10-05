@@ -2,10 +2,9 @@
 
 <div align="center">
 
-<img src="assets/icon.png" width="160" alt="CableNet Logo" style="border-radius: 36px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+![CableNet](assets/banner.jpg)
 
-### *Sua conexão, à vista.*
-**Monitor de status de rede inteligente, nativo e elegante para a barra de menus do macOS.**
+### O monitor inteligente de conexão Ethernet e Wi-Fi na barra de menus do macOS
 
 [![macOS](https://img.shields.io/badge/macOS-13.0+-blue?style=for-the-badge&logo=apple)](https://github.com/WennyLife/CableNet)
 [![Arquitetura](https://img.shields.io/badge/Bin%C3%A1rio-Universal%20(Apple%20Silicon%20%2B%20Intel)-6f42c1?style=for-the-badge)](https://github.com/WennyLife/CableNet)
@@ -49,6 +48,47 @@ Se você usa docks, adaptadores USB-C/Thunderbolt ou cabos RJ45 conectados ao se
 * 🔒 **Privacidade Absoluta (Zero Rastreamento):**
   * Sem anúncios, sem SDKs de terceiros, sem coleta de dados pessoais, identificadores de máquina ou histórico de tráfego.
   * App 100% autônomo e de código aberto.
+
+---
+
+## 📐 Como o CableNet Funciona
+
+```mermaid
+flowchart TD
+    subgraph macOS["🍎 macOS SystemConfiguration & CoreWLAN"]
+        Routing["Tabela de Rotas / Interface Primária"]
+        NetEvent["SCDynamicStore (Eventos de Rede em Tempo Real)"]
+    end
+
+    subgraph CableNetApp["🔌 CableNet Menu Bar App"]
+        Observer["Observador Nativo de Interface"]
+        Probe["Diagnóstico Leve de Internet (a cada 90s)"]
+        IconEngine["Renderizador Gráfico Procedural"]
+    end
+
+    subgraph MenuBar["🖥️ Barra de Menus do macOS"]
+        RJ45["🟢 RJ45 Verde (Cabo Conectado + Internet)"]
+        WiFi["🔵 Wi-Fi Ciano (Sem Fio + Internet)"]
+        NoNet["🔴 Alerta Vermelho (Conectado mas Sem Internet)"]
+    end
+
+    NetEvent --> Observer
+    Routing --> Observer
+    Observer --> IconEngine
+    Observer --> Probe
+    Probe --> IconEngine
+
+    IconEngine --> RJ45
+    IconEngine --> WiFi
+    IconEngine --> NoNet
+
+    classDef apple fill:#0071e3,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef app fill:#1a2332,stroke:#00b4d8,stroke-width:2px,color:#fff;
+    classDef status fill:#0b3c26,stroke:#2ecc71,stroke-width:2px,color:#fff;
+    class macOS apple;
+    class CableNetApp app;
+    class MenuBar status;
+```
 
 ---
 

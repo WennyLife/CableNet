@@ -104,7 +104,7 @@ final class NetworkObserver {
         }, &context)
         if let store {
             let keys = ["State:/Network/Global/IPv4", "State:/Network/Global/IPv6"]
-            let patterns = ["State:/Network/Interface/.*/Link", "State:/Network/Interface/.*/AirPort", "Setup:/Network/Service/.*"]
+            let patterns = ["State:/Network/Interface/.*/Link", "State:/Network/Interface/.*/IPv4", "State:/Network/Interface/.*/AirPort", "Setup:/Network/Service/.*"]
             SCDynamicStoreSetNotificationKeys(store, keys as CFArray, patterns as CFArray)
             source = SCDynamicStoreCreateRunLoopSource(nil, store, 0)
             if let source { CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes) }
@@ -124,7 +124,27 @@ final class NetworkObserver {
         let serviceID = primary["PrimaryService"] as? String ?? ""
         let service = dictionary("Setup:/Network/Service/\(serviceID)")
         let interfaceSettings = dictionary("Setup:/Network/Service/\(serviceID)/Interface")
-        let interfaces = SCNetworkInterfaceCopyAll() as? [SCNetworkInterface] ?? []
+        let interfaces = (SCNetworkInterfaceCopyAll() as NSArray as? [SCNetworkInterface]) ?? []
+
+        let wifiDevices = CWWiFiClient.shared().interfaces() ?? []
+        let wifiNames = Set(wifiDevices.compactMap { $0.interfaceName })
+        let wifiOn = wifiDevices.contains { $0.powerOn() }
+
+        // Prioridade absoluta para cabo de rede conectado e ativo com IP
+        let activeEthernet = interfaces.first(where: {
+            guard (SCNetworkInterfaceGetInterfaceType($0) as String?) == (kSCNetworkInterfaceTypeEthernet as String),
+                  let name = SCNetworkInterfaceGetBSDName($0) as String? else { return false }
+            let linkActive = dictionary("State:/Network/Interface/\(name)/Link")["Active"] as? Bool == true
+            let hasIPv4 = dictionary("State:/Network/Interface/\(name)/IPv4")["Addresses"] != nil
+            return linkActive && hasIPv4
+        }).flatMap { SCNetworkInterfaceGetBSDName($0) as String? }
+
+        if let eth = activeEthernet {
+            let ethHardware = interfaces.first { (SCNetworkInterfaceGetBSDName($0) as String?) == eth }
+            let ethName = ethHardware.flatMap { SCNetworkInterfaceGetLocalizedDisplayName($0) as String? } ?? "USB 10/100/1000 LAN"
+            return NetworkState(connection: .ethernet, interface: eth, service: ethName, wifiEnabled: wifiOn)
+        }
+
         if interface.isEmpty {
             interface = interfaces.first(where: {
                 guard (SCNetworkInterfaceGetInterfaceType($0) as String?) == (kSCNetworkInterfaceTypeEthernet as String),
@@ -134,8 +154,6 @@ final class NetworkObserver {
         }
         let hardware = interfaces.first { (SCNetworkInterfaceGetBSDName($0) as String?) == interface }
         let type = hardware.flatMap { SCNetworkInterfaceGetInterfaceType($0) as String? } ?? interfaceSettings["Type"] as? String ?? ""
-        let wifiDevices = CWWiFiClient.shared().interfaces() ?? []
-        let wifiNames = Set(wifiDevices.compactMap { $0.interfaceName })
         let connection: Connection
         if interface.isEmpty { connection = .offline }
         else if type == (kSCNetworkInterfaceTypeIEEE80211 as String) || wifiNames.contains(interface) { connection = .wifi }
@@ -143,7 +161,7 @@ final class NetworkObserver {
         else { connection = .other }
         return NetworkState(connection: connection, interface: interface,
                             service: service["UserDefinedName"] as? String ?? interface,
-                            wifiEnabled: wifiDevices.contains { $0.powerOn() })
+                            wifiEnabled: wifiOn)
     }
 
     func refresh() { onChange?(snapshot()) }
@@ -368,9 +386,29 @@ final class CableNetPanelModel: ObservableObject {
         stopTrafficMonitor()
     }
 
+    func getCachedSSID() -> String? {
+        guard let store = SCDynamicStoreCreate(nil, "CableNet-SSID" as CFString, nil, nil),
+              let dict = SCDynamicStoreCopyValue(store, "State:/Network/Interface/en0/AirPort" as CFString) as? [String: Any],
+              let data = dict["CachedScanRecord"] as? Data else { return nil }
+        do {
+            let unarchiver = try NSKeyedUnarchiver(forReadingFrom: data)
+            unarchiver.requiresSecureCoding = false
+            if let decoded = unarchiver.decodeObject(forKey: "root") as? [String: Any],
+               let ssid = decoded["SSID_STR"] as? String, !ssid.isEmpty {
+                return ssid
+            }
+        } catch { }
+        return nil
+    }
+
     func refreshInfo() {
         localIP = getLocalIP(for: state.interface) ?? "—"
-        if let iface = CWWiFiClient.shared().interface() {
+        if state.connection == .ethernet {
+            currentSSID = "Cabo de Rede (Gigabit)"
+            currentSignalStr = "Cabo Direto (100%)"
+            currentBand = "Ethernet"
+            currentChannel = 0
+        } else if let iface = CWWiFiClient.shared().interface() {
             if let ch = iface.wlanChannel() {
                 currentChannel = ch.channelNumber
                 currentBand = ch.channelBand == .band5GHz ? "5 GHz" : (ch.channelBand == .band2GHz ? "2.4 GHz" : "6 GHz")
@@ -380,22 +418,18 @@ final class CableNetPanelModel: ObservableObject {
                 let quality = rssi >= -55 ? "Excelente" : (rssi >= -70 ? "Bom" : "Médio")
                 currentSignalStr = "\(rssi) dBm (\(quality))"
             }
-            if let direct = iface.ssid(), !direct.isEmpty {
+            let direct = iface.ssid() ?? getCachedSSID()
+            if let direct, !direct.isEmpty {
                 currentSSID = direct
                 UserDefaults.standard.set(direct, forKey: "lastKnownSSID")
-            } else if state.connection == .ethernet {
-                currentSSID = "Ethernet LAN"
-                currentSignalStr = "Cabo Direto (100%)"
-            } else if currentSSID == "Conectando…" || currentSSID == "Wi-Fi Conectado" {
-                if let saved = UserDefaults.standard.string(forKey: "lastKnownSSID"), !saved.isEmpty {
-                    currentSSID = saved
-                } else if currentChannel > 0 {
-                    currentSSID = "Wi-Fi (\(currentBand) · Ch \(currentChannel))"
-                }
+            } else if let saved = UserDefaults.standard.string(forKey: "lastKnownSSID"), !saved.isEmpty {
+                currentSSID = saved
+            } else if currentChannel > 0 {
+                currentSSID = "Wi-Fi (\(currentBand) · Ch \(currentChannel))"
             }
-        } else if state.connection == .ethernet {
-            currentSSID = "Ethernet LAN"
-            currentSignalStr = "Cabo Direto (100%)"
+        } else {
+            currentSSID = "Sem Conexão"
+            currentSignalStr = "—"
         }
     }
 
@@ -411,7 +445,7 @@ final class CableNetPanelModel: ObservableObject {
             }
             var result: [ScannedNetwork] = []
             var seen = Set<String>()
-            let directSSID = iface.ssid() ?? ""
+            let directSSID = iface.ssid() ?? self.getCachedSSID() ?? ""
             let currentChannel = iface.wlanChannel()?.channelNumber ?? 0
             let currentRssi = iface.rssiValue()
 
@@ -461,12 +495,15 @@ final class CableNetPanelModel: ObservableObject {
             DispatchQueue.main.async {
                 self.networks = result
                 self.isScanning = false
-                if let currentMatch = result.first(where: { $0.isCurrent }) {
-                    if self.state.connection == .wifi {
+                if self.state.connection == .wifi {
+                    if let currentMatch = result.first(where: { $0.isCurrent }) {
                         self.currentSSID = currentMatch.ssid
                         UserDefaults.standard.set(currentMatch.ssid, forKey: "lastKnownSSID")
                         self.currentBand = currentMatch.band == "5G" ? "5 GHz" : (currentMatch.band == "2.4G" ? "2.4 GHz" : "6 GHz")
                         self.currentChannel = currentMatch.channel
+                    } else if let cached = self.getCachedSSID(), !cached.isEmpty {
+                        self.currentSSID = cached
+                        UserDefaults.standard.set(cached, forKey: "lastKnownSSID")
                     }
                 }
             }
@@ -643,7 +680,7 @@ struct CableNetPanelView: View {
                     Text("CableNet")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.white)
-                    Text("v1.1")
+                    Text("v1.1.1")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(Color(white: 0.55))
                         .padding(.horizontal, 5)
@@ -896,7 +933,7 @@ struct CableNetPanelView: View {
             .padding(.top, 2)
 
             // Networks List
-            ScrollView(.vertical, showsIndicators: true) {
+            ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 4) {
                     if model.networks.isEmpty {
                         if model.isScanning {
@@ -907,12 +944,14 @@ struct CableNetPanelView: View {
                                     .font(.system(size: 11.5))
                                     .foregroundColor(Color(white: 0.6))
                             }
-                            .padding(.vertical, 20)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
                         } else {
                             Text("Nenhuma rede detectada")
                                 .font(.system(size: 12))
                                 .foregroundColor(Color(white: 0.6))
-                                .padding(.vertical, 14)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 38)
                         }
                     } else {
                         ForEach(model.networks) { net in
@@ -961,7 +1000,8 @@ struct CableNetPanelView: View {
                 }
                 .padding(.horizontal, 2)
             }
-            .frame(maxHeight: 180)
+            .scrollIndicators(.never)
+            .frame(maxHeight: model.networks.isEmpty ? 50 : 160)
 
             Divider().background(Color(white: 1, opacity: 0.12))
 
@@ -1086,9 +1126,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Popover configuration
         popover.behavior = .transient
         let hosting = NSHostingController(rootView: CableNetPanelView(model: panelModel))
-        hosting.preferredContentSize = NSSize(width: 360, height: 480)
+        hosting.preferredContentSize = NSSize(width: 360, height: 530)
         popover.contentViewController = hosting
-        popover.contentSize = NSSize(width: 360, height: 480)
+        popover.contentSize = NSSize(width: 360, height: 530)
 
         button.target = self
         button.action = #selector(togglePopover(_:))

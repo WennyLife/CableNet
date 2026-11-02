@@ -14,7 +14,7 @@
 
 **Saiba instantaneamente se o seu Mac está navegando pelo cabo de rede (Ethernet) ou pelo Wi-Fi, com diagnóstico visual de internet e animações fluidas diretamente na barra de menus!**
 
-[Download macOS (.dmg)](https://github.com/WennyLife/CableNet/raw/main/release/CableNet-1.0.11.dmg) • [Download (.zip)](https://github.com/WennyLife/CableNet/raw/main/release/CableNet-1.0.11.zip)
+[Download macOS (.dmg)](https://github.com/WennyLife/CableNet/raw/main/release/CableNet-1.1.0.dmg) • [Download (.zip)](https://github.com/WennyLife/CableNet/raw/main/release/CableNet-1.1.0.zip)
 
 </div>
 
@@ -30,6 +30,15 @@ Se você usa docks, adaptadores USB-C/Thunderbolt ou cabos RJ45 conectados ao se
 
 ## ✨ Principais Funcionalidades
 
+* 📱 **Novo Painel Visual Glassmorphism (v1.1):**
+  * Interface moderna estilo popover translúcido do macOS Sequoia, rápida, fluida e elegante.
+  * **Card da Conexão Ativa:** Exibe com destaque em qual rede Wi-Fi está conectada (ou se está no cabo de rede), banda (`5 GHz` / `2.4 GHz`), canal, IP local e qualidade de sinal em dBm.
+* 📶 **Lista de Redes Wi-Fi Disponíveis em Tempo Real:**
+  * Escaneia e lista as redes ao redor sem travar a interface.
+  * Barras dinâmicas de sinal (1 a 4 barras com cores por intensidade), badges de faixa e cadeado de segurança.
+* ⚡️ **Monitor de Tráfego ao Vivo & Teste de Velocidade:**
+  * **Tráfego Instantâneo:** Medição em tempo real de `↓ Download` e `↑ Upload` trafegando a cada segundo.
+  * **Teste de Velocidade Embutido:** 1 clique para medir a velocidade máxima em Mbps e a latência (ping em ms) usando a tecnologia oficial `networkQuality` da Apple.
 * 🌐 **Detecção Automática da Interface Ativa:**
   * **Cabo de Rede (RJ45):** Ícone RJ45 característico com indicador verde brilhante quando a rota principal for Ethernet.
   * **Wi-Fi:** Ícone de ondas de sinal ciano suave quando conectado à rede sem fio.

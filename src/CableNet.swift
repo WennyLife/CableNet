@@ -325,7 +325,7 @@ final class CableNetPanelModel: ObservableObject {
     @Published var state = NetworkState(connection: .offline, interface: "", service: "", wifiEnabled: false)
     @Published var health: InternetHealth = .checking
     @Published var latencyMs: Int? = 7
-    @Published var currentSSID: String = "Conectando…"
+    @Published var currentSSID: String = UserDefaults.standard.string(forKey: "lastKnownSSID") ?? "Wi-Fi Conectado"
     @Published var currentBand: String = "5 GHz"
     @Published var currentChannel: Int = 0
     @Published var currentSignalStr: String = "—"
@@ -378,13 +378,20 @@ final class CableNetPanelModel: ObservableObject {
             let rssi = iface.rssiValue()
             if rssi != 0 {
                 let quality = rssi >= -55 ? "Excelente" : (rssi >= -70 ? "Bom" : "Médio")
-                currentSignalStr = "\(quality) (\(rssi) dBm)"
+                currentSignalStr = "\(rssi) dBm (\(quality))"
             }
             if let direct = iface.ssid(), !direct.isEmpty {
                 currentSSID = direct
+                UserDefaults.standard.set(direct, forKey: "lastKnownSSID")
             } else if state.connection == .ethernet {
                 currentSSID = "Ethernet LAN"
                 currentSignalStr = "Cabo Direto (100%)"
+            } else if currentSSID == "Conectando…" || currentSSID == "Wi-Fi Conectado" {
+                if let saved = UserDefaults.standard.string(forKey: "lastKnownSSID"), !saved.isEmpty {
+                    currentSSID = saved
+                } else if currentChannel > 0 {
+                    currentSSID = "Wi-Fi (\(currentBand) · Ch \(currentChannel))"
+                }
             }
         } else if state.connection == .ethernet {
             currentSSID = "Ethernet LAN"
@@ -397,7 +404,8 @@ final class CableNetPanelModel: ObservableObject {
         isScanning = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
-            guard let iface = CWWiFiClient.shared().interface() else {
+            let client = CWWiFiClient()
+            guard let iface = client.interface() else {
                 DispatchQueue.main.async { self.isScanning = false }
                 return
             }
@@ -405,6 +413,7 @@ final class CableNetPanelModel: ObservableObject {
             var seen = Set<String>()
             let directSSID = iface.ssid() ?? ""
             let currentChannel = iface.wlanChannel()?.channelNumber ?? 0
+            let currentRssi = iface.rssiValue()
 
             if let raw = try? iface.scanForNetworks(withSSID: nil) {
                 for net in raw {
@@ -429,7 +438,7 @@ final class CableNetPanelModel: ObservableObject {
                     else { level = 1 }
 
                     let isCurr = (!directSSID.isEmpty && directSSID == ssid) ||
-                                 (directSSID.isEmpty && currentChannel != 0 && currentChannel == net.wlanChannel?.channelNumber && abs(net.rssiValue - iface.rssiValue()) < 10)
+                                 (currentChannel != 0 && currentChannel == net.wlanChannel?.channelNumber && abs(net.rssiValue - currentRssi) < 18)
 
                     result.append(ScannedNetwork(
                         ssid: ssid,
@@ -455,6 +464,7 @@ final class CableNetPanelModel: ObservableObject {
                 if let currentMatch = result.first(where: { $0.isCurrent }) {
                     if self.state.connection == .wifi {
                         self.currentSSID = currentMatch.ssid
+                        UserDefaults.standard.set(currentMatch.ssid, forKey: "lastKnownSSID")
                         self.currentBand = currentMatch.band == "5G" ? "5 GHz" : (currentMatch.band == "2.4G" ? "2.4 GHz" : "6 GHz")
                         self.currentChannel = currentMatch.channel
                     }
@@ -823,8 +833,10 @@ struct CableNetPanelView: View {
                             .font(.system(size: 8.5, weight: .bold))
                             .foregroundColor(Color(white: 0.5))
                         Text(model.currentSignalStr)
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 10.5, weight: .semibold))
                             .foregroundColor(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -858,7 +870,7 @@ struct CableNetPanelView: View {
 
             // Available Networks Section
             HStack {
-                Text("REDES DISPONÍVEIS (\(model.networks.count))")
+                Text(model.isScanning && model.networks.isEmpty ? "REDES DISPONÍVEIS (Buscando…)" : "REDES DISPONÍVEIS (\(model.networks.count))")
                     .font(.system(size: 10.5, weight: .bold))
                     .foregroundColor(Color(white: 0.55))
                     .tracking(0.6)
@@ -873,7 +885,7 @@ struct CableNetPanelView: View {
                             .font(.system(size: 10, weight: .bold))
                             .rotationEffect(.degrees(model.spinRefresh ? 360 : 0))
                             .animation(model.spinRefresh ? Animation.linear(duration: 0.8).repeatForever(autoreverses: false) : .default, value: model.spinRefresh)
-                        Text("Atualizar")
+                        Text(model.isScanning ? "Buscando…" : "Atualizar")
                             .font(.system(size: 11, weight: .medium))
                     }
                     .foregroundColor(Color(red: 0, green: 0.78, blue: 0.92))
@@ -887,10 +899,21 @@ struct CableNetPanelView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(spacing: 4) {
                     if model.networks.isEmpty {
-                        Text(model.isScanning ? "Buscando redes Wi-Fi ao redor…" : "Nenhuma rede detectada")
-                            .font(.system(size: 12))
-                            .foregroundColor(Color(white: 0.6))
-                            .padding(.vertical, 14)
+                        if model.isScanning {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .scaleEffect(0.7)
+                                Text("Escaneando redes Wi-Fi ao redor…")
+                                    .font(.system(size: 11.5))
+                                    .foregroundColor(Color(white: 0.6))
+                            }
+                            .padding(.vertical, 20)
+                        } else {
+                            Text("Nenhuma rede detectada")
+                                .font(.system(size: 12))
+                                .foregroundColor(Color(white: 0.6))
+                                .padding(.vertical, 14)
+                        }
                     } else {
                         ForEach(model.networks) { net in
                             HStack(spacing: 8) {
@@ -1062,7 +1085,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Popover configuration
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: CableNetPanelView(model: panelModel))
+        let hosting = NSHostingController(rootView: CableNetPanelView(model: panelModel))
+        hosting.preferredContentSize = NSSize(width: 360, height: 480)
+        popover.contentViewController = hosting
+        popover.contentSize = NSSize(width: 360, height: 480)
 
         button.target = self
         button.action = #selector(togglePopover(_:))
@@ -1090,6 +1116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         observer.onChange = { [weak self] state in self?.apply(state) }
         observer.refresh()
+        panelModel.scanWifi()
 
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(wake), name: NSWorkspace.didWakeNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(sleep), name: NSWorkspace.willSleepNotification, object: nil)
@@ -1119,7 +1146,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panelModel.onOpen()
             icon.stopAnimation()
             NSApp.activate(ignoringOtherApps: true)
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
         }
     }
 

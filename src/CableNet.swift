@@ -1074,6 +1074,12 @@ struct CableNetPanelView: View {
         .padding(14)
         .frame(width: 360)
         .background(Color(red: 0.11, green: 0.11, blue: 0.12).opacity(0.96))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color(white: 1, opacity: 0.15), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.45), radius: 20, x: 0, y: 10)
     }
 }
 
@@ -1097,6 +1103,31 @@ struct SignalBarsView: View {
     }
 }
 
+// MARK: - Native Floating Panel
+
+final class CableNetPanelWindow: NSPanel {
+    init(contentView: NSView) {
+        super.init(contentRect: NSRect(x: 0, y: 0, width: 360, height: 490),
+                   styleMask: [.borderless, .nonactivatingPanel],
+                   backing: .buffered,
+                   defer: false)
+        self.isOpaque = false
+        self.backgroundColor = .clear
+        self.hasShadow = true
+        self.level = .popUpMenu
+        self.isMovableByWindowBackground = false
+        self.hidesOnDeactivate = false
+        self.contentView = contentView
+    }
+
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+
+    override func cancelOperation(_ sender: Any?) {
+        orderOut(nil)
+    }
+}
+
 // MARK: - App Delegate & Status Item
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -1106,7 +1137,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let probe = InternetProbe()
     private var health: InternetHealth = .checking
     private var state = NetworkState(connection: .offline, interface: "", service: "", wifiEnabled: false)
-    private var popover = NSPopover()
+    private var panelWindow: CableNetPanelWindow!
+    private var eventMonitor: Any?
+    private var lastCloseTime: TimeInterval = 0
     private let panelModel = CableNetPanelModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -1123,15 +1156,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         icon.animationsEnabled = panelModel.animationsEnabled
         button.addSubview(icon)
 
-        // Popover configuration
-        popover.behavior = .transient
-        let hosting = NSHostingController(rootView: CableNetPanelView(model: panelModel))
-        hosting.preferredContentSize = NSSize(width: 360, height: 530)
-        popover.contentViewController = hosting
-        popover.contentSize = NSSize(width: 360, height: 530)
+        // Floating Panel configuration
+        let hosting = NSHostingView(rootView: CableNetPanelView(model: panelModel))
+        hosting.frame = NSRect(x: 0, y: 0, width: 360, height: 490)
+        panelWindow = CableNetPanelWindow(contentView: hosting)
 
         button.target = self
-        button.action = #selector(togglePopover(_:))
+        button.action = #selector(togglePanel(_:))
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
 
         panelModel.onToggleAnimations = { [weak self] in
@@ -1177,17 +1208,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func togglePopover(_ sender: Any?) {
-        guard let button = statusItem.button else { return }
-        if popover.isShown {
-            popover.performClose(sender)
-            panelModel.onClose()
-        } else {
-            panelModel.onOpen()
-            icon.stopAnimation()
-            NSApp.activate(ignoringOtherApps: true)
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .maxY)
+    @objc private func togglePanel(_ sender: Any?) {
+        let now = ProcessInfo.processInfo.systemUptime
+        if panelWindow.isVisible {
+            closePanel()
+        } else if now - lastCloseTime > 0.25 {
+            openPanel()
         }
+    }
+
+    private func openPanel() {
+        guard let button = statusItem.button, let window = button.window else { return }
+        panelModel.onOpen()
+        icon.stopAnimation()
+
+        let buttonScreenRect = window.convertToScreen(button.frame)
+        let panelWidth: CGFloat = 360
+        let panelHeight: CGFloat = 490
+
+        // Centered horizontally directly under the CableNet icon
+        var targetX = buttonScreenRect.midX - (panelWidth / 2)
+
+        // Ensure it stays safely within the screen bounds
+        if let screen = window.screen ?? NSScreen.main {
+            let minX = screen.visibleFrame.minX + 8
+            let maxX = screen.visibleFrame.maxX - panelWidth - 8
+            targetX = min(maxX, max(minX, targetX))
+        }
+
+        // Position vertically: exactly 4 pixels below the bottom of the menu bar!
+        let targetY = buttonScreenRect.minY - panelHeight - 4
+
+        panelWindow.setFrameOrigin(NSPoint(x: targetX, y: targetY))
+        panelWindow.makeKeyAndOrderFront(nil)
+
+        // Listen for clicks outside to auto-close
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+        }
+        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            self?.closePanel()
+        }
+    }
+
+    private func closePanel() {
+        lastCloseTime = ProcessInfo.processInfo.systemUptime
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+            eventMonitor = nil
+        }
+        panelWindow.orderOut(nil)
+        panelModel.onClose()
     }
 
     private func apply(_ newState: NetworkState) {
@@ -1218,7 +1289,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func sleep() {
         icon.stopAnimation()
         probe.stop()
-        panelModel.onClose()
+        closePanel()
     }
 
     private var healthLabel: String {

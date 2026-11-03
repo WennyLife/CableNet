@@ -14,7 +14,7 @@
 
 **Saiba instantaneamente se o seu Mac está navegando pelo cabo de rede (Ethernet) ou pelo Wi-Fi, com diagnóstico visual de internet e animações fluidas diretamente na barra de menus!**
 
-[Download macOS (.dmg)](https://github.com/WennyLife/CableNet/raw/main/release/CableNet-1.1.1.dmg) • [Download (.zip)](https://github.com/WennyLife/CableNet/raw/main/release/CableNet-1.1.1.zip)
+[Download macOS (.dmg)](https://github.com/WennyLife/CableNet/raw/main/release/CableNet-1.1.2.dmg) • [Download (.zip)](https://github.com/WennyLife/CableNet/raw/main/release/CableNet-1.1.2.zip)
 
 </div>
 

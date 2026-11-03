@@ -680,7 +680,7 @@ struct CableNetPanelView: View {
                     Text("CableNet")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.white)
-                    Text("v1.1.1")
+                    Text("v1.1.2")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(Color(white: 0.55))
                         .padding(.horizontal, 5)
@@ -1071,15 +1071,9 @@ struct CableNetPanelView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(14)
-        .frame(width: 360)
-        .background(Color(red: 0.11, green: 0.11, blue: 0.12).opacity(0.96))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color(white: 1, opacity: 0.15), lineWidth: 1)
-        )
-        .shadow(color: Color.black.opacity(0.45), radius: 20, x: 0, y: 10)
+        .padding(EdgeInsets(top: 10, leading: 14, bottom: 12, trailing: 14))
+        .frame(width: 358)
+        .background(Color.clear)
     }
 }
 
@@ -1103,29 +1097,65 @@ struct SignalBarsView: View {
     }
 }
 
-// MARK: - Native Floating Panel
+// MARK: - Native Anchored Chrome & Floating Panel
+
+final class AnchoredChrome: NSView {
+    var arrowX: CGFloat = 180
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let body = NSBezierPath(roundedRect: NSRect(x: 0.5, y: 10, width: bounds.width - 1, height: bounds.height - 10.5), xRadius: 10, yRadius: 10)
+        let bg = NSColor(srgbRed: 0.085, green: 0.098, blue: 0.102, alpha: 0.98)
+        let strokeColor = NSColor.white.withAlphaComponent(0.18)
+
+        bg.setFill()
+        body.fill()
+        strokeColor.setStroke()
+        body.lineWidth = 1
+        body.stroke()
+
+        let x = min(max(arrowX, 18), bounds.width - 18)
+        let tip = NSBezierPath()
+        tip.move(to: NSPoint(x: x - 9, y: 11))
+        tip.line(to: NSPoint(x: x, y: 1))
+        tip.line(to: NSPoint(x: x + 9, y: 11))
+        tip.close()
+        bg.setFill()
+        tip.fill()
+
+        let edges = NSBezierPath()
+        edges.move(to: NSPoint(x: x - 9, y: 10))
+        edges.line(to: NSPoint(x: x, y: 1))
+        edges.line(to: NSPoint(x: x + 9, y: 10))
+        edges.lineWidth = 1
+        strokeColor.setStroke()
+        edges.stroke()
+    }
+}
+
+private func rounded(_ view: NSView) -> NSView {
+    view.wantsLayer = true
+    view.layer?.cornerRadius = 10
+    view.layer?.masksToBounds = true
+    return view
+}
+
+func playPanelPop(on view: NSView) {
+    guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+    view.wantsLayer = true
+    let pop = CAKeyframeAnimation(keyPath: "transform.scale")
+    pop.values = [0.97, 1.01, 1.0]
+    pop.keyTimes = [0.0, 0.6, 1.0]
+    pop.duration = 0.16
+    pop.timingFunction = CAMediaTimingFunction(name: .easeOut)
+    view.layer?.add(pop, forKey: "panelPop")
+}
 
 final class CableNetPanelWindow: NSPanel {
-    init(contentView: NSView) {
-        super.init(contentRect: NSRect(x: 0, y: 0, width: 360, height: 490),
-                   styleMask: [.borderless, .nonactivatingPanel],
-                   backing: .buffered,
-                   defer: false)
-        self.isOpaque = false
-        self.backgroundColor = .clear
-        self.hasShadow = true
-        self.level = .popUpMenu
-        self.isMovableByWindowBackground = false
-        self.hidesOnDeactivate = false
-        self.contentView = contentView
-    }
-
+    var onEscape: (() -> Void)?
+    override func cancelOperation(_ sender: Any?) { onEscape?() }
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
-
-    override func cancelOperation(_ sender: Any?) {
-        orderOut(nil)
-    }
 }
 
 // MARK: - App Delegate & Status Item
@@ -1138,7 +1168,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var health: InternetHealth = .checking
     private var state = NetworkState(connection: .offline, interface: "", service: "", wifiEnabled: false)
     private var panelWindow: CableNetPanelWindow!
-    private var eventMonitor: Any?
+    private var chrome: AnchoredChrome!
+    private var localMonitor: Any?
+    private var globalMonitor: Any?
     private var lastCloseTime: TimeInterval = 0
     private let panelModel = CableNetPanelModel()
 
@@ -1156,10 +1188,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         icon.animationsEnabled = panelModel.animationsEnabled
         button.addSubview(icon)
 
-        // Floating Panel configuration
+        // Floating Panel configuration with Sense Pro AnchoredChrome
+        let panelWidth: CGFloat = 360
+        let panelHeight: CGFloat = 505
+
+        panelWindow = CableNetPanelWindow(
+            contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panelWindow.isReleasedWhenClosed = false
+        panelWindow.hasShadow = true
+        panelWindow.isOpaque = false
+        panelWindow.backgroundColor = .clear
+        panelWindow.level = .popUpMenu
+        panelWindow.appearance = NSAppearance(named: .darkAqua)
+        panelWindow.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        panelWindow.becomesKeyOnlyIfNeeded = false
+        panelWindow.isMovable = false
+        panelWindow.onEscape = { [weak self] in
+            self?.closePanel()
+        }
+
+        chrome = AnchoredChrome(frame: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight))
         let hosting = NSHostingView(rootView: CableNetPanelView(model: panelModel))
-        hosting.frame = NSRect(x: 0, y: 0, width: 360, height: 490)
-        panelWindow = CableNetPanelWindow(contentView: hosting)
+        hosting.frame = NSRect(x: 1, y: 11, width: panelWidth - 2, height: panelHeight - 12)
+        hosting.autoresizingMask = [.width, .height]
+        chrome.addSubview(rounded(hosting))
+        panelWindow.contentView = chrome
 
         button.target = self
         button.action = #selector(togglePanel(_:))
@@ -1218,47 +1275,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func openPanel() {
-        guard let button = statusItem.button, let window = button.window else { return }
+        guard let button = statusItem.button, let host = button.window, let screen = host.screen ?? NSScreen.main else { return }
         panelModel.onOpen()
         icon.stopAnimation()
 
-        let buttonScreenRect = window.convertToScreen(button.frame)
-        let panelWidth: CGFloat = 360
-        let panelHeight: CGFloat = 490
+        let anchor = host.convertToScreen(button.convert(button.bounds, to: nil)).standardized
+        let visible = screen.visibleFrame
+        let safe = visible.insetBy(dx: min(8, visible.width / 4), dy: min(8, visible.height / 4))
 
-        // Centered horizontally directly under the CableNet icon
-        var targetX = buttonScreenRect.midX - (panelWidth / 2)
+        let width: CGFloat = 360
+        let height: CGFloat = min(505, safe.height)
 
-        // Ensure it stays safely within the screen bounds
-        if let screen = window.screen ?? NSScreen.main {
-            let minX = screen.visibleFrame.minX + 8
-            let maxX = screen.visibleFrame.maxX - panelWidth - 8
-            targetX = min(maxX, max(minX, targetX))
-        }
+        let x = min(max(anchor.midX - width / 2, safe.minX), safe.maxX - width)
+        let y = min(max(anchor.minY - height - 5, safe.minY), safe.maxY - height)
+        let frame = NSRect(x: x, y: y, width: width, height: height)
 
-        // Position vertically: exactly 4 pixels below the bottom of the menu bar!
-        let targetY = buttonScreenRect.minY - panelHeight - 4
+        panelWindow.setFrame(frame, display: true)
 
-        panelWindow.setFrameOrigin(NSPoint(x: targetX, y: targetY))
+        chrome.arrowX = anchor.midX - frame.minX
+        chrome.needsDisplay = true
+
+        panelWindow.alphaValue = 1
         panelWindow.makeKeyAndOrderFront(nil)
+        playPanelPop(on: chrome)
 
-        // Listen for clicks outside to auto-close
-        if let monitor = eventMonitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        eventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            self?.closePanel()
-        }
+        installMonitors()
     }
 
     private func closePanel() {
         lastCloseTime = ProcessInfo.processInfo.systemUptime
-        if let monitor = eventMonitor {
-            NSEvent.removeMonitor(monitor)
-            eventMonitor = nil
-        }
+        removeMonitors()
         panelWindow.orderOut(nil)
         panelModel.onClose()
+    }
+
+    private func installMonitors() {
+        removeMonitors()
+        localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] event in
+            guard let self, self.panelWindow.isVisible else { return event }
+            if event.type == .keyDown && event.keyCode == 53 { self.closePanel(); return nil }
+            if event.type != .keyDown && !self.isInside(NSEvent.mouseLocation) { self.closePanel() }
+            return event
+        }
+        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            guard let self, self.panelWindow.isVisible, !self.isInside(NSEvent.mouseLocation) else { return }
+            self.closePanel()
+        }
+    }
+
+    private func removeMonitors() {
+        if let localMonitor { NSEvent.removeMonitor(localMonitor) }
+        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
+        localMonitor = nil
+        globalMonitor = nil
+    }
+
+    private func isInside(_ point: NSPoint) -> Bool {
+        guard let button = statusItem.button, let host = button.window else { return panelWindow.frame.contains(point) }
+        let anchor = host.convertToScreen(button.convert(button.bounds, to: nil)).standardized
+        return panelWindow.frame.contains(point) || anchor.contains(point)
     }
 
     private func apply(_ newState: NetworkState) {
